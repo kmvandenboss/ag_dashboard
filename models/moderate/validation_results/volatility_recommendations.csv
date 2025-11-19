@@ -1,0 +1,5 @@
+id,recommendation,rationale,implementation,expected_impact,risk
+1,Add minimum volatility filter,Losses occur at lower volatility (21.6%) than winners (23.7%),Skip trades when 20-day volatility < 27.0% (worst quintile threshold),"Would filter out 162 trades (20.0%), reducing losses by ~52 trades",May also filter some winners - needs testing
+2,Use dynamic stop multiplier based on volatility,"Fixed 3.5× ATR gives 3.83% average stop width, regardless of regime","Increase ATR multiplier in low vol (e.g., 4.5×), decrease in high vol (e.g., 2.5×)",More consistent risk in percentage terms across volatility regimes,May increase whipsaw in high volatility
+3,Reduce position size in low volatility regimes,Worst quintile (Q4_High) has 67.9% win rate vs best (Q5_Highest) at 79.6%,Apply 0.5× multiplier when volatility < 27.0%,Reduces exposure during less favorable conditions,Smaller wins during profitable low-vol trades
+4,Filter out trades in sharply contracting volatility,Model may struggle when market dynamics are shifting,Skip trades when current vol < recent 10-day avg vol,Filters regime transition periods,May miss early entries in new trends

@@ -1,0 +1,16 @@
+{
+  "training_date": "2025-11-16T13:05:04.030300",
+  "training_samples": 4781,
+  "training_period_start": "2005-01-03T00:00:00",
+  "training_period_end": "2023-12-29T00:00:00",
+  "num_features": 168,
+  "target": "fwd_ret_10d",
+  "model_type": "XGBRegressor",
+  "hyperparameters": {
+    "n_estimators": 300,
+    "max_depth": 6,
+    "learning_rate": 0.03,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8
+  }
+}

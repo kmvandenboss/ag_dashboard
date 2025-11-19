@@ -1,0 +1,122 @@
+{
+  "model_name": "Conservative v2.0 (Capital Preservation)",
+  "model_id": "conservative_v2_0",
+  "version": "2.0",
+  "risk_profile": "conservative",
+  "date_created": "2025-11-16",
+  "validation_status": "production_ready",
+  "parameters": {
+    "position_sizing": {
+      "r_per_trade": 0.15,
+      "max_position_size_r": 1.0,
+      "max_concurrent_positions": 5,
+      "max_portfolio_risk": 0.75,
+      "description": "Risk 15% of equity per trade, max 5 positions (75% total exposure)"
+    },
+    "thresholds": {
+      "type": "dynamic_percentile",
+      "long_percentile": 0.87,
+      "short_percentile": 0.13,
+      "rolling_window": 100,
+      "description": "Dynamic rolling thresholds: top 13% for longs, bottom 13% for shorts (highly selective)"
+    },
+    "conviction_sizing": {
+      "type": "percentile_based",
+      "use_percentile_sizing": true,
+      "tiers": {
+        "percentile_92_plus": 1.0,
+        "percentile_87_92": 0.75,
+        "percentile_below_87": 0.0
+      },
+      "description": "Size positions based on percentile rank - only trade highest quality signals"
+    },
+    "stops": {
+      "atr_multiplier": 3.25,
+      "atr_period": 20,
+      "time_stop_enabled": true,
+      "time_stop_days": 10,
+      "description": "3.25\u00c3\u2014 ATR stop loss (tighter than Moderate 3.5\u00c3\u2014), exit after 10 days"
+    },
+    "profit_targets": {
+      "enabled": true,
+      "target_r": 1.75,
+      "description": "Take profit at 1.75R - lower target for higher hit rate"
+    },
+    "exit_order": {
+      "priority": [
+        "atr_stop",
+        "profit_target",
+        "time_stop"
+      ],
+      "description": "ATR stop \u00e2\u2020\u2019 Profit target \u00e2\u2020\u2019 Time stop"
+    }
+  },
+  "transaction_costs": {
+    "slippage_pct": 0.002,
+    "commission_pct": 0.001,
+    "round_trip_cost_pct": 0.006,
+    "description": "0.6% per round trip (0.2% slippage + 0.1% commission \u00c3\u2014 2)"
+  },
+  "ml_model": {
+    "type": "XGBoost",
+    "target": "fwd_ret_10d",
+    "horizon_days": 10,
+    "features": 169,
+    "retrain_frequency": "per_period",
+    "description": "Gradient boosting regression predicting 10-day forward returns"
+  },
+  "expected_performance": {
+    "avg_return_per_period": 0.65,
+    "avg_annual_return": 0.3,
+    "avg_sharpe": 3.0,
+    "avg_max_dd": -0.04,
+    "worst_max_dd": -0.085,
+    "avg_win_rate": 0.74,
+    "avg_trades_per_period": 120,
+    "avg_trades_per_year": 60,
+    "description": "Conservative model prioritizing capital preservation and consistency"
+  },
+  "risk_characteristics": {
+    "drawdown_tolerance": "low",
+    "volatility": "low",
+    "psychological_difficulty": "low",
+    "capital_requirement_min": 80000,
+    "capital_requirement_recommended": 100000,
+    "suitable_for_beginners": true,
+    "description": "Capital preservation approach for risk-averse traders and beginners"
+  },
+  "design_rationale": {
+    "purpose": "Provide steady growth with minimal drawdowns for conservative traders",
+    "target_traders": "Risk-averse traders, beginners, those prioritizing capital preservation over maximum returns",
+    "key_differences": [
+      "15% R per trade (75% of Moderate 20%, 50% of Growth 30%)",
+      "87th/13th percentile entry (more selective than Moderate 85th/15th)",
+      "High conviction at \u00e2\u2030\u00a592nd percentile (vs \u00e2\u2030\u00a590th Moderate)",
+      "Tighter stop loss 3.25\u00c3\u2014 ATR (vs 3.5\u00c3\u2014 Moderate, 3.75\u00c3\u2014 Growth)",
+      "Lower profit target 1.75R (vs 2.0R Moderate, 2.25R Growth)",
+      "Skips below 87th percentile (vs 80th Moderate, 75th Growth)"
+    ]
+  },
+  "three_model_progression": {
+    "conservative_v2_0": {
+      "annual_return": "~30%",
+      "worst_dd": "~-8.5%",
+      "position_size": "15% R",
+      "for": "Safe, steady growth"
+    },
+    "moderate_v1_0": {
+      "annual_return": "37.95%",
+      "worst_dd": "-11.30%",
+      "position_size": "20% R",
+      "for": "Balanced approach"
+    },
+    "growth": {
+      "annual_return": "61.16%",
+      "worst_dd": "-17.79%",
+      "position_size": "30% R",
+      "for": "Maximum returns"
+    },
+    "description": "Conservative \u00e2\u2020\u2019 Moderate \u00e2\u2020\u2019 Growth: Each step up = +50% position size, +25-30% returns, +50-60% drawdowns"
+  },
+  "date_deployed": "2025-11-19"
+}

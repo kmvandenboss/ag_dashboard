@@ -1,0 +1,74 @@
+name: Daily Data Update and Signal Generation
+
+# Run every day at 9 PM UTC (4 PM ET - after market close)
+on:
+  schedule:
+    - cron: '0 21 * * *'  # 9 PM UTC = 4 PM ET
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  generate-signals:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas numpy scikit-learn xgboost yfinance requests joblib
+
+      - name: Run data update pipeline
+        run: |
+          echo "Running complete data update pipeline..."
+          python scripts/update_all.py
+        continue-on-error: false
+
+      - name: Generate daily signals
+        run: |
+          echo "Generating trading signals..."
+          python scripts/generate_signals.py --save-csv
+        continue-on-error: false
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Add only the specific files we want to commit
+          git add data/*.csv || true
+          git add signals/signal_history.csv || true
+          git add models/*/*.pkl || true
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update daily signals - $(date +'%Y-%m-%d')"
+            git push
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload signal as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-signal-${{ github.run_number }}
+          path: signals/signal_history.csv
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          echo "✅ Daily signal generation complete!"
+          echo ""
+          echo "Latest signal:"
+          tail -1 signals/signal_history.csv

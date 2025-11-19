@@ -1,0 +1,107 @@
+{
+  "model_name": "Moderate (Balanced_Risk_v1)",
+  "model_id": "balanced_risk_v1",
+  "version": "1.0",
+  "risk_profile": "moderate",
+  "date_created": "2025-11-14",
+  "validation_status": "design",
+
+  "parameters": {
+    "position_sizing": {
+      "r_per_trade": 0.20,
+      "max_position_size_r": 1.0,
+      "max_concurrent_positions": 5,
+      "max_portfolio_risk": 1.0,
+      "description": "Risk 20% of equity per trade, max 5 positions (100% total exposure)"
+    },
+
+    "thresholds": {
+      "type": "dynamic_percentile",
+      "long_percentile": 0.85,
+      "short_percentile": 0.15,
+      "rolling_window": 100,
+      "description": "Dynamic rolling thresholds: top 15% for longs, bottom 15% for shorts (more selective than aggressive models)"
+    },
+
+    "conviction_sizing": {
+      "type": "percentile_based",
+      "use_percentile_sizing": true,
+      "tiers": {
+        "percentile_90_plus": 1.0,
+        "percentile_85_90": 0.75,
+        "percentile_80_85": 0.5,
+        "percentile_below_80": 0.0
+      },
+      "description": "Size positions based on percentile rank - only trade top predictions"
+    },
+
+    "stops": {
+      "atr_multiplier": 3.5,
+      "atr_period": 20,
+      "time_stop_enabled": true,
+      "time_stop_days": 10,
+      "description": "3.5× ATR stop loss (between conservative 3× and aggressive 4×), exit after 10 days"
+    },
+
+    "profit_targets": {
+      "enabled": true,
+      "target_r": 2.0,
+      "description": "Take profit at 2.0R - lock in wins while allowing growth"
+    },
+
+    "exit_order": {
+      "priority": ["atr_stop", "profit_target", "time_stop"],
+      "description": "ATR stop → Profit target → Time stop"
+    }
+  },
+
+  "transaction_costs": {
+    "slippage_pct": 0.002,
+    "commission_pct": 0.001,
+    "round_trip_cost_pct": 0.006,
+    "description": "0.6% per round trip (0.2% slippage + 0.1% commission × 2)"
+  },
+
+  "ml_model": {
+    "type": "XGBoost",
+    "target": "fwd_ret_10d",
+    "horizon_days": 10,
+    "features": 169,
+    "retrain_frequency": "per_period",
+    "description": "Gradient boosting regression predicting 10-day forward returns"
+  },
+
+  "expected_performance": {
+    "avg_return_per_period": 0.60,
+    "avg_annual_return": 0.30,
+    "avg_sharpe": 2.50,
+    "avg_max_dd": -0.08,
+    "worst_max_dd": -0.15,
+    "avg_win_rate": 0.64,
+    "avg_trades_per_period": 190,
+    "avg_trades_per_year": 95,
+    "description": "Estimated based on interpolation between conservative and balanced models"
+  },
+
+  "risk_characteristics": {
+    "drawdown_tolerance": "moderate",
+    "volatility": "moderate",
+    "psychological_difficulty": "moderate",
+    "capital_requirement_min": 60000,
+    "capital_requirement_recommended": 120000,
+    "suitable_for_beginners": false,
+    "description": "Balanced approach for growth-oriented traders with reasonable risk tolerance"
+  },
+
+  "design_rationale": {
+    "purpose": "Fill the gap between ultra-conservative (10% R) and high-risk (40% R) models",
+    "target_traders": "Those seeking solid growth (30-35% annual) with moderate drawdowns (<-10%)",
+    "key_differences": [
+      "2× position size vs conservative (20% vs 10% R)",
+      "50% position size vs balanced (20% vs 40% R)",
+      "More selective entry (85th/15th percentile vs 80th/20th)",
+      "Tighter profit target (2.0R vs 2.5R) for more frequent wins",
+      "Slightly tighter stops (3.5× ATR vs 4×) for better risk control"
+    ]
+  }
+}

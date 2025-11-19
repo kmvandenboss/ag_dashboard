@@ -1,0 +1,44 @@
+{
+  "model_name": "Corn High-Conviction",
+  "description": "High-conviction model for corn futures (90th/10th percentile)",
+  "version": "1.0",
+  "asset": "corn",
+  "ticker": "ZC=F",
+  "parameters": {
+    "position_sizing": {
+      "r_per_trade": 0.2,
+      "max_concurrent_positions": 3,
+      "max_portfolio_risk": 0.6,
+      "description": "20% R per trade, max 3 positions per asset"
+    },
+    "thresholds": {
+      "long_percentile": 0.9,
+      "short_percentile": 0.1,
+      "rolling_window": 100,
+      "description": "HIGH CONVICTION: Top/bottom 10% of predictions (vs 15% baseline)"
+    },
+    "stops": {
+      "atr_multiplier": 3.5,
+      "atr_period": 20,
+      "time_stop_days": 10
+    },
+    "profit_targets": {
+      "enabled": true,
+      "target_r": 2.0
+    }
+  },
+  "expected_performance": {
+    "avg_sharpe": 5.8,
+    "avg_win_rate": 0.753,
+    "trades_per_year": 117
+  },
+  "training": {
+    "target": "fwd_ret_10d",
+    "model_type": "XGBoost Regressor",
+    "features": 169,
+    "training_period": "2005-01-03 to 2025-11-13",
+    "samples": 5240
+  },
+  "created_date": "2025-11-17",
+  "status": "production_ready"
+}

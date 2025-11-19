@@ -1,0 +1,40 @@
+{
+  "model_name": "Corn High-Conviction (90th/10th Percentile)",
+  "asset": "corn",
+  "training_date": "2025-11-17 09:43:21",
+  "train_samples": 5240,
+  "train_period_start": "2005-01-03",
+  "train_period_end": "2025-11-13",
+  "num_features": 169,
+  "target_variable": "fwd_ret_10d",
+  "thresholds": {
+    "long_percentile": 0.9,
+    "short_percentile": 0.1,
+    "rolling_window": 100
+  },
+  "model_params": {
+    "n_estimators": 300,
+    "max_depth": 6,
+    "learning_rate": 0.03,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8
+  },
+  "top_10_features": [
+    "target_up_3d",
+    "fwd_ret_3d",
+    "is_pollination_season",
+    "month_7",
+    "growing_stress",
+    "production_mbu",
+    "mm_net_position",
+    "dry_days_30d",
+    "pct_very_poor",
+    "condition_index_change_4w"
+  ],
+  "validation_results": {
+    "avg_sharpe": 5.8,
+    "avg_win_rate": 0.753,
+    "avg_trades_per_year": 117,
+    "note": "From walk-forward validation (2014-2025)"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "model_name": "Soybean High-Conviction (90th/10th Percentile)",
+  "asset": "soybean",
+  "training_date": "2025-11-17 09:43:25",
+  "train_samples": 5243,
+  "train_period_start": "2005-01-03",
+  "train_period_end": "2025-11-14",
+  "num_features": 168,
+  "target_variable": "fwd_ret_10d",
+  "thresholds": {
+    "long_percentile": 0.9,
+    "short_percentile": 0.1,
+    "rolling_window": 100
+  },
+  "model_params": {
+    "n_estimators": 300,
+    "max_depth": 6,
+    "learning_rate": 0.03,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8
+  },
+  "top_10_features": [
+    "target_up_3d",
+    "fwd_ret_3d",
+    "gdd_14d",
+    "is_flowering_season",
+    "is_harvest_season",
+    "ma_20",
+    "pct_very_poor",
+    "month_9",
+    "month_7",
+    "bb_lower"
+  ],
+  "validation_results": {
+    "avg_sharpe": 3.82,
+    "avg_win_rate": 0.788,
+    "avg_trades_per_year": 114,
+    "note": "From walk-forward validation (2014-2025)"
+  }
+}

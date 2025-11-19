@@ -1,0 +1,47 @@
+{
+  "model_name": "Moderate Soybean (20% R)",
+  "description": "Medium-risk soybean futures model targeting 30-35% annual returns with -8% to -10% max drawdown",
+  "version": "1.0",
+  "commodity": "soybeans",
+  "ticker": "ZS=F",
+
+  "parameters": {
+    "position_sizing": {
+      "r_per_trade": 0.20,
+      "max_concurrent_positions": 5,
+      "max_portfolio_risk": 1.0
+    },
+    "thresholds": {
+      "long_percentile": 0.85,
+      "short_percentile": 0.15,
+      "rolling_window": 100
+    },
+    "stops": {
+      "atr_multiplier": 3.5,
+      "atr_period": 20,
+      "time_stop_days": 10
+    },
+    "profit_targets": {
+      "enabled": true,
+      "target_r": 2.0
+    }
+  },
+
+  "expected_performance": {
+    "avg_annual_return": 0.35,
+    "avg_sharpe": 2.5,
+    "avg_max_dd": -0.08,
+    "avg_win_rate": 0.70,
+    "trades_per_year": 86
+  },
+
+  "training": {
+    "target": "fwd_ret_10d",
+    "model_type": "XGBoost Regressor",
+    "features": "Full feature set (169 features)",
+    "validation": "Walk-forward (6 periods, 2014-2025)"
+  },
+
+  "created_date": "2025-11-16",
+  "status": "pending_validation"
+}
