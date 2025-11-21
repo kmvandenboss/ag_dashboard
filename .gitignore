@@ -49,6 +49,7 @@ models/*/*.joblib
 # Signal outputs
 signals/*.csv
 !signals/.gitkeep
+!signals/current_signals.csv
 
 # API keys and secrets
 .env

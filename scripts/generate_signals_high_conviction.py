@@ -379,6 +379,38 @@ def process_commodity(commodity, commodity_config, args):
     return signal
 
 
+def save_current_signals(results):
+    """Save current signals to CSV for cloud dashboard"""
+
+    current_signals_file = SIGNALS_DIR / 'current_signals.csv'
+
+    # Prepare data for CSV
+    signal_rows = []
+    for commodity, signal in results.items():
+        if signal:
+            signal_rows.append({
+                'date': signal['date'].strftime('%Y-%m-%d') if hasattr(signal['date'], 'strftime') else signal['date'],
+                'commodity': commodity,
+                'signal': signal['signal'],
+                'confidence': signal.get('confidence', 0),
+                'prediction': signal.get('prediction', 0),
+                'percentile': signal.get('percentile', 0),
+                'current_price': signal.get('current_price', 0),
+                'stop_loss': signal.get('stop_loss', 0) if signal.get('stop_loss') else '',
+                'profit_target': signal.get('profit_target', 0) if signal.get('profit_target') else '',
+                'position_size_pct': signal.get('position_size_pct', 0),
+                'atr': signal.get('atr', 0),
+                'time_stop_date': signal.get('time_stop_date', '').strftime('%Y-%m-%d') if signal.get('time_stop_date') else ''
+            })
+
+    if signal_rows:
+        df = pd.DataFrame(signal_rows)
+        df.to_csv(current_signals_file, index=False)
+        print(f"\n✅ Current signals saved to {current_signals_file}")
+        print("   Push this file to GitHub to update cloud dashboard:")
+        print(f"   git add signals/current_signals.csv && git commit -m 'Update signals' && git push")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Generate HIGH CONVICTION signals for corn and soybean futures')
     parser.add_argument('--email', type=str, help='Email address for alerts')
@@ -426,6 +458,9 @@ def main():
                 print(f"{emoji} {commodity.capitalize():10s}: {signal_emoji} {signal_type}")
         else:
             print(f"❌ {commodity.capitalize():10s}: FAILED")
+
+    # Always save current signals for cloud dashboard
+    save_current_signals(results)
 
     print(f"\n✅ Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 

@@ -128,6 +128,52 @@ def check_live_data_available(config):
     return config['data_path'].exists() and config['config_path'].exists()
 
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_saved_signals():
+    """Load saved signals from CSV file"""
+    signals_file = BASE_DIR / 'signals' / 'current_signals.csv'
+
+    if signals_file.exists():
+        try:
+            df = pd.read_csv(signals_file)
+            if len(df) > 0:
+                df['date'] = pd.to_datetime(df['date'])
+                if 'time_stop_date' in df.columns:
+                    df['time_stop_date'] = pd.to_datetime(df['time_stop_date'], errors='coerce')
+                return df
+        except Exception as e:
+            st.warning(f"Could not load saved signals: {e}")
+
+    return None
+
+
+def get_saved_signal_for_commodity(commodity):
+    """Get saved signal for a specific commodity"""
+    signals_df = load_saved_signals()
+
+    if signals_df is not None:
+        commodity_signals = signals_df[signals_df['commodity'] == commodity]
+        if len(commodity_signals) > 0:
+            signal_row = commodity_signals.iloc[-1]  # Get most recent
+
+            return {
+                'date': signal_row['date'],
+                'signal': signal_row['signal'],
+                'confidence': signal_row['confidence'],
+                'prediction': signal_row['prediction'],
+                'percentile': signal_row['percentile'],
+                'current_price': signal_row['current_price'],
+                'stop_loss': signal_row['stop_loss'] if signal_row['stop_loss'] != '' else None,
+                'profit_target': signal_row['profit_target'] if signal_row['profit_target'] != '' else None,
+                'position_size_pct': signal_row['position_size_pct'],
+                'atr': signal_row['atr'],
+                'time_stop_date': signal_row['time_stop_date'] if pd.notna(signal_row.get('time_stop_date')) else None,
+                'is_live': True
+            }
+
+    return None
+
+
 @st.cache_data
 def load_validation_results(results_path):
     """Load walk-forward validation results"""
@@ -562,9 +608,14 @@ def main():
             results_df = load_validation_results(config['validation_results'])
             trades_df = load_validation_trades(config['validation_trades'])
 
-        # Try to generate live signal if data available
-        signal = None
-        if has_live_data:
+        # Try to load saved signal first (for cloud deployment)
+        signal = get_saved_signal_for_commodity(commodity)
+
+        if signal:
+            # Saved signal found
+            st.success(f"✓ SAVED SIGNAL LOADED | DATE: {signal['date'].strftime('%Y-%m-%d')} | {len(trades_df)} BACKTEST TRADES")
+        elif has_live_data:
+            # No saved signal, but we have data files - generate live signal
             try:
                 with st.spinner("GENERATING LIVE SIGNAL..."):
                     df = load_market_data(config['data_path'])
@@ -584,6 +635,7 @@ def main():
                 st.warning(f"Could not generate live signal: {e} - showing historical data")
                 signal = get_most_recent_signal(trades_df)
         else:
+            # No saved signal and no data files - show historical
             signal = get_most_recent_signal(trades_df)
             st.success(f"✓ DATA LOADED | {len(trades_df)} TRADES | PERIODS: 2014-2025")
 
