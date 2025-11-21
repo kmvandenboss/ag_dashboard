@@ -4,10 +4,11 @@ Terminal-style Streamlit dashboard for displaying High Conviction corn and soybe
 
 ## Features
 
-- **Current Signals**: Real-time LONG/SHORT/HOLD signals with entry, stop, and target prices
-- **YTD Performance**: 2024-2025 walk-forward backtest results
-- **Trade History**: Complete YTD trade log with PnL
+- **Most Recent Signal**: Display of the last completed trade from backtest
+- **YTD Performance**: 2024-2025 walk-forward backtest results with key metrics
+- **Trade History**: Complete YTD trade log with PnL in R-multiples
 - **All Periods Summary**: Historical validation across 6 periods (2014-2025)
+- **Aggregate Statistics**: Overall performance metrics across all validation periods
 
 ## Quick Start
 
@@ -26,12 +27,13 @@ streamlit run streamlit_dashboard.py
 
 The dashboard will open automatically in your browser at `http://localhost:8501`
 
-### 3. View Signals
+### 3. View Dashboard
 
 - Select either CORN or SOYBEANS from the dropdown
-- View current signal status (LONG/SHORT/HOLD)
-- Review YTD performance metrics
+- View most recent completed trade
+- Review YTD 2024-2025 performance metrics
 - Examine complete trade history
+- Analyze performance across all validation periods
 
 ## Terminal Style
 
@@ -43,9 +45,13 @@ The dashboard features a retro terminal aesthetic:
 
 ## Data Sources
 
-All data is loaded from the existing model validation results:
-- `models/corn_high_conviction/validation_results/`
-- `models/soy_high_conviction/validation_results/`
+All data is loaded from walk-forward validation results (included in repository):
+- `models/corn_high_conviction/validation_results/walk_forward_6period_results.csv`
+- `models/corn_high_conviction/validation_results/walk_forward_6period_trades.csv`
+- `models/soy_high_conviction/validation_results/walk_forward_6period_results.csv`
+- `models/soy_high_conviction/validation_results/walk_forward_6period_trades.csv`
+
+No raw data files or trained models are required - only the validation results.
 
 ## Model Configuration
 
@@ -57,10 +63,11 @@ All data is loaded from the existing model validation results:
 
 ## Notes
 
-- Signals are generated from the most recent data in the combined features files
-- The dashboard uses cached data for performance
+- Dashboard displays **historical backtest data only** (not live trading signals)
+- The most recent signal shown is the last completed trade from the 2024-2025 validation period
 - All performance metrics are based on walk-forward validation (2014-2025)
 - YTD refers to the 2024-2025 validation period
+- Data is cached for performance
 
 ## Deploying to Streamlit Cloud (Optional)
 

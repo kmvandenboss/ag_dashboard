@@ -12,8 +12,6 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime, timedelta
-import json
-import joblib
 
 # Page configuration - terminal style
 st.set_page_config(
@@ -92,33 +90,18 @@ BASE_DIR = Path(__file__).parent
 # Commodity configurations
 COMMODITY_CONFIGS = {
     'corn': {
-        'data_path': BASE_DIR / 'data' / 'corn_combined_features.csv',
-        'config_path': BASE_DIR / 'models' / 'corn_high_conviction' / 'model_config.json',
-        'model_dir': BASE_DIR / 'models' / 'corn_high_conviction',
         'validation_results': BASE_DIR / 'models' / 'corn_high_conviction' / 'validation_results' / 'walk_forward_6period_results.csv',
         'validation_trades': BASE_DIR / 'models' / 'corn_high_conviction' / 'validation_results' / 'walk_forward_6period_trades.csv',
         'display_name': 'CORN',
         'emoji': '🌽'
     },
     'soybean': {
-        'data_path': BASE_DIR / 'data' / 'soybean_combined_features.csv',
-        'config_path': BASE_DIR / 'models' / 'soy_high_conviction' / 'model_config.json',
-        'model_dir': BASE_DIR / 'models' / 'soy_high_conviction',
         'validation_results': BASE_DIR / 'models' / 'soy_high_conviction' / 'validation_results' / 'walk_forward_6period_results.csv',
         'validation_trades': BASE_DIR / 'models' / 'soy_high_conviction' / 'validation_results' / 'walk_forward_6period_trades.csv',
         'display_name': 'SOYBEANS',
         'emoji': '🫘'
     }
 }
-
-
-@st.cache_data
-def load_data(data_path):
-    """Load latest market data"""
-    df = pd.read_csv(data_path)
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.sort_values('date').reset_index(drop=True)
-    return df
 
 
 @st.cache_data
@@ -137,125 +120,22 @@ def load_validation_trades(trades_path):
     return df
 
 
-@st.cache_resource
-def load_model(model_dir):
-    """Load trained model"""
-    model_path = model_dir / 'model_2024.pkl'
-    scaler_path = model_dir / 'scaler_2024.pkl'
-    imputer_path = model_dir / 'imputer_2024.pkl'
+def get_most_recent_signal(trades_df):
+    """Get the most recent trade as current signal indicator"""
 
-    model = joblib.load(model_path)
-    scaler = joblib.load(scaler_path)
-    imputer = joblib.load(imputer_path)
+    # Get most recent trade
+    recent_trade = trades_df.iloc[-1]
 
-    feature_names = list(imputer.feature_names_in_) if hasattr(imputer, 'feature_names_in_') else None
-
-    return model, imputer, scaler, feature_names
-
-
-def calculate_atr(prices, high=None, low=None, period=20):
-    """Calculate Average True Range"""
-    if high is not None and low is not None:
-        tr1 = high - low
-        tr2 = abs(high - prices.shift(1))
-        tr3 = abs(low - prices.shift(1))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    else:
-        tr = prices.pct_change().abs().rolling(5).std() * prices
-
-    atr = tr.rolling(period).mean()
-    return atr
-
-
-def generate_current_signal(df, model, imputer, scaler, feature_cols, config):
-    """Generate current trading signal"""
-
-    LONG_PERCENTILE = config['parameters']['thresholds']['long_percentile']
-    SHORT_PERCENTILE = config['parameters']['thresholds']['short_percentile']
-    ROLLING_WINDOW = config['parameters']['thresholds']['rolling_window']
-    R_PER_TRADE = config['parameters']['position_sizing']['r_per_trade']
-    ATR_MULTIPLIER = config['parameters']['stops']['atr_multiplier']
-    ATR_PERIOD = config['parameters']['stops']['atr_period']
-    PROFIT_TARGET_R = config['parameters']['profit_targets']['target_r']
-    TIME_STOP_DAYS = config['parameters']['stops']['time_stop_days']
-
-    recent_df = df.tail(150).copy()
-
-    features = recent_df[feature_cols].ffill()
-    features_imputed = imputer.transform(features)
-    features_scaled = scaler.transform(features_imputed)
-
-    predictions = model.predict(features_scaled)
-    recent_df['prediction'] = predictions
-
-    recent_df['pred_percentile'] = recent_df['prediction'].rolling(
-        ROLLING_WINDOW, min_periods=20
-    ).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
-
-    if 'high' in recent_df.columns and 'low' in recent_df.columns:
-        recent_df['atr'] = calculate_atr(
-            recent_df['close'],
-            recent_df['high'],
-            recent_df['low'],
-            period=ATR_PERIOD
-        )
-    else:
-        recent_df['atr'] = calculate_atr(recent_df['close'], period=ATR_PERIOD)
-
-    today = recent_df[recent_df['pred_percentile'].notna()].iloc[-1]
-
-    signal = None
-    position_size = 0
-    percentile = today['pred_percentile']
-
-    if percentile >= LONG_PERCENTILE:
-        signal = 'LONG'
-        position_size = 1.0
-    elif percentile <= SHORT_PERCENTILE:
-        signal = 'SHORT'
-        position_size = 1.0
-
-    if signal:
-        current_price = today['close']
-        atr = today['atr']
-        stop_distance = ATR_MULTIPLIER * atr
-
-        if signal == 'LONG':
-            stop_loss = current_price - stop_distance
-            profit_target = current_price + (PROFIT_TARGET_R * stop_distance)
-        else:
-            stop_loss = current_price + stop_distance
-            profit_target = current_price - (PROFIT_TARGET_R * stop_distance)
-
-        position_size_r = R_PER_TRADE * position_size
-
-        return {
-            'date': today['date'],
-            'signal': signal,
-            'confidence': percentile if signal == 'LONG' else (1 - percentile),
-            'prediction': today['prediction'],
-            'percentile': percentile,
-            'current_price': current_price,
-            'stop_loss': stop_loss,
-            'profit_target': profit_target,
-            'position_size_pct': position_size_r * 100,
-            'atr': atr,
-            'time_stop_date': today['date'] + timedelta(days=TIME_STOP_DAYS)
-        }
-    else:
-        return {
-            'date': today['date'],
-            'signal': 'HOLD',
-            'confidence': 0,
-            'prediction': today['prediction'],
-            'percentile': percentile,
-            'current_price': today['close'],
-            'stop_loss': None,
-            'profit_target': None,
-            'position_size_pct': 0,
-            'atr': today['atr'],
-            'time_stop_date': None
-        }
+    return {
+        'date': recent_trade['exit_date'],
+        'signal': recent_trade['direction'],
+        'entry_price': recent_trade['entry_price'],
+        'exit_price': recent_trade['exit_price'],
+        'pnl_r': recent_trade['pnl_r'],
+        'exit_reason': recent_trade['exit_reason'],
+        'days_held': recent_trade['days_held'],
+        'entry_date': recent_trade['entry_date']
+    }
 
 
 def display_terminal_header():
@@ -276,53 +156,39 @@ def display_terminal_header():
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     st.markdown(f"**SYSTEM TIME:** `{current_time}`")
     st.markdown("**MODEL:** `HIGH_CONVICTION_v2024 | 90th/10th PERCENTILE`")
+    st.markdown("**DATA:** `WALK-FORWARD VALIDATION 2014-2025`")
     st.markdown("---")
 
 
-def display_current_signal(commodity, signal):
-    """Display current signal in terminal style"""
+def display_recent_signal(commodity, signal):
+    """Display most recent signal in terminal style"""
 
-    st.markdown(f"### {COMMODITY_CONFIGS[commodity]['emoji']} {COMMODITY_CONFIGS[commodity]['display_name']} - CURRENT SIGNAL")
+    st.markdown(f"### {COMMODITY_CONFIGS[commodity]['emoji']} {COMMODITY_CONFIGS[commodity]['display_name']} - MOST RECENT SIGNAL")
 
-    signal_date = signal['date'].strftime('%Y-%m-%d') if isinstance(signal['date'], pd.Timestamp) else signal['date']
+    entry_date = signal['entry_date'].strftime('%Y-%m-%d')
+    exit_date = signal['date'].strftime('%Y-%m-%d')
 
-    if signal['signal'] == 'HOLD':
-        st.markdown("```")
-        st.markdown(f"""
+    signal_color = "LONG ↑" if signal['signal'] == 'LONG' else "SHORT ↓"
+    pnl_display = f"{signal['pnl_r']:+.2f}R"
+
+    st.markdown("```")
+    st.markdown(f"""
 ┌─────────────────────────────────────────────────────────────────┐
-│ SIGNAL: HOLD                                                    │
-│ DATE:   {signal_date}                                      │
+│ LAST TRADE: {signal_color}                                      │
+│ ENTRY:      {entry_date}                                   │
+│ EXIT:       {exit_date}                                   │
 │                                                                 │
-│ STATUS: NO ACTIVE SIGNAL                                        │
-│ PRICE:  ${signal['current_price']:.2f}                                       │
-│ PRED:   {signal['prediction']:+.2%}                                         │
-│ PCTL:   {signal['percentile']:.1%} (NEED >90% OR <10%)                      │
+│ ENTRY PX:   ${signal['entry_price']:.2f}                                    │
+│ EXIT PX:    ${signal['exit_price']:.2f}                                    │
+│ PNL:        {pnl_display}                                             │
 │                                                                 │
-│ [WAITING FOR HIGH CONVICTION TRIGGER]                           │
+│ EXIT RSN:   {signal['exit_reason'].upper()}                                          │
+│ DAYS HELD:  {signal['days_held']}                                                 │
+│                                                                 │
+│ [HISTORICAL BACKTEST DATA - NOT LIVE TRADING]                   │
 └─────────────────────────────────────────────────────────────────┘
-        """)
-        st.markdown("```")
-    else:
-        signal_color = "LONG ↑" if signal['signal'] == 'LONG' else "SHORT ↓"
-        st.markdown("```")
-        st.markdown(f"""
-┌─────────────────────────────────────────────────────────────────┐
-│ ⚡ SIGNAL: {signal_color}                                       │
-│ DATE:     {signal_date}                                    │
-│                                                                 │
-│ ENTRY:    ${signal['current_price']:.2f}                                    │
-│ STOP:     ${signal['stop_loss']:.2f}                                    │
-│ TARGET:   ${signal['profit_target']:.2f}                                    │
-│                                                                 │
-│ CONFIDENCE: {signal['confidence']:.1%}                                     │
-│ PERCENTILE: {signal['percentile']:.1%}                                     │
-│ POSITION:   {signal['position_size_pct']:.1f}% of equity                          │
-│                                                                 │
-│ RISK/REWARD: 1:2                                                │
-│ TIME STOP:   {str(signal['time_stop_date'])[:10]} (10 days)               │
-└─────────────────────────────────────────────────────────────────┘
-        """)
-        st.markdown("```")
+    """)
+    st.markdown("```")
 
 
 def display_ytd_performance(commodity, results_df, trades_df):
@@ -403,10 +269,10 @@ def display_ytd_trades(commodity, trades_df):
     st.markdown("---")
 
 
-def display_all_periods_summary(results_df):
+def display_all_periods_summary(commodity, results_df):
     """Display summary of all validation periods"""
 
-    st.markdown("### 📊 ALL PERIODS - WALK-FORWARD VALIDATION SUMMARY")
+    st.markdown(f"### 📊 {COMMODITY_CONFIGS[commodity]['display_name']} - ALL PERIODS WALK-FORWARD VALIDATION")
 
     # Format for display
     display_results = results_df[[
@@ -430,6 +296,24 @@ def display_all_periods_summary(results_df):
         hide_index=True
     )
 
+    # Summary stats
+    st.markdown("#### AGGREGATE STATISTICS")
+    col1, col2, col3, col4 = st.columns(4)
+
+    total_pnl_all = results_df['total_pnl_r'].sum()
+    avg_win_rate = results_df['win_rate'].mean()
+    avg_sharpe = results_df['sharpe_ratio'].mean()
+    worst_dd = results_df['max_drawdown_r'].max()
+
+    with col1:
+        st.metric("TOTAL PNL (ALL)", f"{total_pnl_all:.2f}R")
+    with col2:
+        st.metric("AVG WIN RATE", f"{avg_win_rate:.1%}")
+    with col3:
+        st.metric("AVG SHARPE", f"{avg_sharpe:.2f}")
+    with col4:
+        st.metric("WORST DD", f"{worst_dd:.2f}R")
+
 
 def main():
     """Main dashboard application"""
@@ -449,25 +333,16 @@ def main():
     try:
         # Load data
         with st.spinner(f"LOADING {config['display_name']} DATA..."):
-            df = load_data(config['data_path'])
             results_df = load_validation_results(config['validation_results'])
             trades_df = load_validation_trades(config['validation_trades'])
 
-            with open(config['config_path'], 'r') as f:
-                model_config = json.load(f)
-
-            model, imputer, scaler, feature_names = load_model(config['model_dir'])
-
-        st.success(f"✓ DATA LOADED | LATEST: {df['date'].max().strftime('%Y-%m-%d')}")
-
-        # Generate current signal
-        with st.spinner("GENERATING SIGNAL..."):
-            signal = generate_current_signal(df, model, imputer, scaler, feature_names, model_config)
+        st.success(f"✓ DATA LOADED | {len(trades_df)} TRADES | PERIODS: 2014-2025")
 
         st.markdown("---")
 
-        # Display current signal
-        display_current_signal(commodity, signal)
+        # Display most recent signal
+        recent_signal = get_most_recent_signal(trades_df)
+        display_recent_signal(commodity, recent_signal)
 
         st.markdown("---")
 
@@ -478,7 +353,7 @@ def main():
         display_ytd_trades(commodity, trades_df)
 
         # Display all periods summary
-        display_all_periods_summary(results_df)
+        display_all_periods_summary(commodity, results_df)
 
     except Exception as e:
         st.error(f"❌ ERROR: {str(e)}")
@@ -489,7 +364,7 @@ def main():
     st.markdown("```")
     st.markdown("""
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║  ⚠️  DISCLAIMER: NOT FINANCIAL ADVICE | TRADE AT YOUR OWN RISK               ║
+║  ⚠️  HISTORICAL BACKTEST DATA | NOT FINANCIAL ADVICE                         ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
     """)
     st.markdown("```")
