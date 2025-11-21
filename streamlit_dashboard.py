@@ -12,6 +12,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime, timedelta
+import json
+import os
 
 # Page configuration - terminal style
 st.set_page_config(
@@ -101,18 +103,29 @@ BASE_DIR = Path(__file__).parent
 # Commodity configurations
 COMMODITY_CONFIGS = {
     'corn': {
+        'data_path': BASE_DIR / 'data' / 'corn_combined_features.csv',
+        'config_path': BASE_DIR / 'models' / 'corn_high_conviction' / 'model_config.json',
+        'model_dir': BASE_DIR / 'models' / 'corn_high_conviction',
         'validation_results': BASE_DIR / 'models' / 'corn_high_conviction' / 'validation_results' / 'walk_forward_6period_results.csv',
         'validation_trades': BASE_DIR / 'models' / 'corn_high_conviction' / 'validation_results' / 'walk_forward_6period_trades.csv',
         'display_name': 'CORN',
         'emoji': '🌽'
     },
     'soybean': {
+        'data_path': BASE_DIR / 'data' / 'soybean_combined_features.csv',
+        'config_path': BASE_DIR / 'models' / 'soy_high_conviction' / 'model_config.json',
+        'model_dir': BASE_DIR / 'models' / 'soy_high_conviction',
         'validation_results': BASE_DIR / 'models' / 'soy_high_conviction' / 'validation_results' / 'walk_forward_6period_results.csv',
         'validation_trades': BASE_DIR / 'models' / 'soy_high_conviction' / 'validation_results' / 'walk_forward_6period_trades.csv',
         'display_name': 'SOYBEANS',
         'emoji': '🫘'
     }
 }
+
+
+def check_live_data_available(config):
+    """Check if live data files are available"""
+    return config['data_path'].exists() and config['config_path'].exists()
 
 
 @st.cache_data
@@ -131,6 +144,143 @@ def load_validation_trades(trades_path):
     return df
 
 
+@st.cache_data
+def load_market_data(data_path):
+    """Load latest market data"""
+    df = pd.read_csv(data_path)
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.sort_values('date').reset_index(drop=True)
+    return df
+
+
+@st.cache_resource
+def load_model(model_dir):
+    """Load trained model"""
+    try:
+        import joblib
+        model_path = model_dir / 'model_2024.pkl'
+        scaler_path = model_dir / 'scaler_2024.pkl'
+        imputer_path = model_dir / 'imputer_2024.pkl'
+
+        model = joblib.load(model_path)
+        scaler = joblib.load(scaler_path)
+        imputer = joblib.load(imputer_path)
+
+        feature_names = list(imputer.feature_names_in_) if hasattr(imputer, 'feature_names_in_') else None
+
+        return model, imputer, scaler, feature_names
+    except Exception as e:
+        st.warning(f"Could not load model: {e}")
+        return None, None, None, None
+
+
+def calculate_atr(prices, high=None, low=None, period=20):
+    """Calculate Average True Range"""
+    if high is not None and low is not None:
+        tr1 = high - low
+        tr2 = abs(high - prices.shift(1))
+        tr3 = abs(low - prices.shift(1))
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    else:
+        tr = prices.pct_change().abs().rolling(5).std() * prices
+
+    atr = tr.rolling(period).mean()
+    return atr
+
+
+def generate_live_signal(df, model, imputer, scaler, feature_cols, config):
+    """Generate live trading signal from current data"""
+
+    LONG_PERCENTILE = config['parameters']['thresholds']['long_percentile']
+    SHORT_PERCENTILE = config['parameters']['thresholds']['short_percentile']
+    ROLLING_WINDOW = config['parameters']['thresholds']['rolling_window']
+    R_PER_TRADE = config['parameters']['position_sizing']['r_per_trade']
+    ATR_MULTIPLIER = config['parameters']['stops']['atr_multiplier']
+    ATR_PERIOD = config['parameters']['stops']['atr_period']
+    PROFIT_TARGET_R = config['parameters']['profit_targets']['target_r']
+    TIME_STOP_DAYS = config['parameters']['stops']['time_stop_days']
+
+    recent_df = df.tail(150).copy()
+
+    features = recent_df[feature_cols].ffill()
+    features_imputed = imputer.transform(features)
+    features_scaled = scaler.transform(features_imputed)
+
+    predictions = model.predict(features_scaled)
+    recent_df['prediction'] = predictions
+
+    recent_df['pred_percentile'] = recent_df['prediction'].rolling(
+        ROLLING_WINDOW, min_periods=20
+    ).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+
+    if 'high' in recent_df.columns and 'low' in recent_df.columns:
+        recent_df['atr'] = calculate_atr(
+            recent_df['close'],
+            recent_df['high'],
+            recent_df['low'],
+            period=ATR_PERIOD
+        )
+    else:
+        recent_df['atr'] = calculate_atr(recent_df['close'], period=ATR_PERIOD)
+
+    today = recent_df[recent_df['pred_percentile'].notna()].iloc[-1]
+
+    signal = None
+    position_size = 0
+    percentile = today['pred_percentile']
+
+    if percentile >= LONG_PERCENTILE:
+        signal = 'LONG'
+        position_size = 1.0
+    elif percentile <= SHORT_PERCENTILE:
+        signal = 'SHORT'
+        position_size = 1.0
+
+    if signal:
+        current_price = today['close']
+        atr = today['atr']
+        stop_distance = ATR_MULTIPLIER * atr
+
+        if signal == 'LONG':
+            stop_loss = current_price - stop_distance
+            profit_target = current_price + (PROFIT_TARGET_R * stop_distance)
+        else:
+            stop_loss = current_price + stop_distance
+            profit_target = current_price - (PROFIT_TARGET_R * stop_distance)
+
+        position_size_r = R_PER_TRADE * position_size
+
+        return {
+            'date': today['date'],
+            'signal': signal,
+            'confidence': percentile if signal == 'LONG' else (1 - percentile),
+            'prediction': today['prediction'],
+            'percentile': percentile,
+            'current_price': current_price,
+            'stop_loss': stop_loss,
+            'profit_target': profit_target,
+            'position_size_pct': position_size_r * 100,
+            'atr': atr,
+            'time_stop_date': today['date'] + timedelta(days=TIME_STOP_DAYS),
+            'is_live': True
+        }
+    else:
+        return {
+            'date': today['date'],
+            'signal': 'HOLD',
+            'confidence': 0,
+            'prediction': today['prediction'],
+            'percentile': percentile,
+            'current_price': today['close'],
+            'stop_loss': None,
+            'profit_target': None,
+            'position_size_pct': 0,
+            'atr': today['atr'],
+            'time_stop_date': None,
+            'is_live': True
+        }
+
+
 def get_most_recent_signal(trades_df):
     """Get the most recent trade as current signal indicator"""
 
@@ -145,7 +295,8 @@ def get_most_recent_signal(trades_df):
         'pnl_r': recent_trade['pnl_r'],
         'exit_reason': recent_trade['exit_reason'],
         'days_held': recent_trade['days_held'],
-        'entry_date': recent_trade['entry_date']
+        'entry_date': recent_trade['entry_date'],
+        'is_live': False
     }
 
 
@@ -175,19 +326,73 @@ def display_terminal_header():
 def display_recent_signal(commodity, signal):
     """Display most recent signal in terminal style"""
 
-    st.markdown(f"### {COMMODITY_CONFIGS[commodity]['emoji']} {COMMODITY_CONFIGS[commodity]['display_name']} - MOST RECENT SIGNAL")
+    is_live = signal.get('is_live', False)
 
-    entry_date = signal['entry_date'].strftime('%Y-%m-%d')
-    exit_date = signal['date'].strftime('%Y-%m-%d')
+    if is_live:
+        st.markdown(f"### {COMMODITY_CONFIGS[commodity]['emoji']} {COMMODITY_CONFIGS[commodity]['display_name']} - CURRENT SIGNAL 🔴 LIVE")
+    else:
+        st.markdown(f"### {COMMODITY_CONFIGS[commodity]['emoji']} {COMMODITY_CONFIGS[commodity]['display_name']} - MOST RECENT SIGNAL")
 
-    signal_color = "LONG ↑" if signal['signal'] == 'LONG' else "SHORT ↓"
-    pnl_display = f"{signal['pnl_r']:+.2f}R"
+    if is_live:
+        # Live signal display
+        signal_date = signal['date'].strftime('%Y-%m-%d') if isinstance(signal['date'], pd.Timestamp) else signal['date']
+        signal_color = "LONG ↑" if signal['signal'] == 'LONG' else ("SHORT ↓" if signal['signal'] == 'SHORT' else "HOLD")
 
-    # Format prices with proper spacing
-    entry_px_str = f"${signal['entry_price']:.2f}"
-    exit_px_str = f"${signal['exit_price']:.2f}"
+        if signal['signal'] == 'HOLD':
+            box_content = f"""
+<div class="terminal-box">
+┌─────────────────────────────────────────────────────────────────┐
+│ SIGNAL: HOLD                                                    │
+│ DATE:   {signal_date:<50} │
+│                                                                 │
+│ STATUS: NO ACTIVE SIGNAL                                        │
+│ PRICE:  ${signal['current_price']:.2f}{'':42} │
+│ PRED:   {signal['prediction']:+.2%}{'':44} │
+│ PCTL:   {signal['percentile']:.1%} (NEED >90% OR <10%){'':24} │
+│                                                                 │
+│ [WAITING FOR HIGH CONVICTION TRIGGER]                           │
+└─────────────────────────────────────────────────────────────────┘
+</div>
+            """
+        else:
+            stop_str = f"${signal['stop_loss']:.2f}"
+            target_str = f"${signal['profit_target']:.2f}"
+            price_str = f"${signal['current_price']:.2f}"
+            time_stop_str = str(signal['time_stop_date'])[:10] if signal['time_stop_date'] else 'N/A'
 
-    box_content = f"""
+            box_content = f"""
+<div class="terminal-box">
+┌─────────────────────────────────────────────────────────────────┐
+│ ⚡ SIGNAL: {signal_color:<50} │
+│ DATE:     {signal_date:<50} │
+│                                                                 │
+│ ENTRY:    {price_str:<50} │
+│ STOP:     {stop_str:<50} │
+│ TARGET:   {target_str:<50} │
+│                                                                 │
+│ CONFIDENCE: {signal['confidence']:.1%}{'':44} │
+│ PERCENTILE: {signal['percentile']:.1%}{'':44} │
+│ POSITION:   {signal['position_size_pct']:.1f}% of equity{'':33} │
+│                                                                 │
+│ RISK/REWARD: 1:2{'':45} │
+│ TIME STOP:   {time_stop_str} (10 days){'':29} │
+│                                                                 │
+│ [🔴 LIVE SIGNAL - CURRENT DATA]                                │
+└─────────────────────────────────────────────────────────────────┘
+</div>
+            """
+    else:
+        # Historical signal display
+        entry_date = signal['entry_date'].strftime('%Y-%m-%d')
+        exit_date = signal['date'].strftime('%Y-%m-%d')
+
+        signal_color = "LONG ↑" if signal['signal'] == 'LONG' else "SHORT ↓"
+        pnl_display = f"{signal['pnl_r']:+.2f}R"
+
+        entry_px_str = f"${signal['entry_price']:.2f}"
+        exit_px_str = f"${signal['exit_price']:.2f}"
+
+        box_content = f"""
 <div class="terminal-box">
 ┌─────────────────────────────────────────────────────────────────┐
 │ LAST TRADE: {signal_color:<50} │
@@ -204,7 +409,7 @@ def display_recent_signal(commodity, signal):
 │ [HISTORICAL BACKTEST DATA - NOT LIVE TRADING]                   │
 └─────────────────────────────────────────────────────────────────┘
 </div>
-    """
+        """
 
     st.markdown(box_content, unsafe_allow_html=True)
 
@@ -348,19 +553,44 @@ def main():
 
     config = COMMODITY_CONFIGS[commodity]
 
+    # Check if live data is available
+    has_live_data = check_live_data_available(config)
+
     try:
-        # Load data
+        # Load validation data (always available)
         with st.spinner(f"LOADING {config['display_name']} DATA..."):
             results_df = load_validation_results(config['validation_results'])
             trades_df = load_validation_trades(config['validation_trades'])
 
-        st.success(f"✓ DATA LOADED | {len(trades_df)} TRADES | PERIODS: 2014-2025")
+        # Try to generate live signal if data available
+        signal = None
+        if has_live_data:
+            try:
+                with st.spinner("GENERATING LIVE SIGNAL..."):
+                    df = load_market_data(config['data_path'])
+
+                    with open(config['config_path'], 'r') as f:
+                        model_config = json.load(f)
+
+                    model, imputer, scaler, feature_names = load_model(config['model_dir'])
+
+                    if model is not None and feature_names is not None:
+                        signal = generate_live_signal(df, model, imputer, scaler, feature_names, model_config)
+                        st.success(f"✓ LIVE DATA LOADED | LATEST: {df['date'].max().strftime('%Y-%m-%d')} | {len(trades_df)} BACKTEST TRADES")
+                    else:
+                        st.warning("Model files not available - showing historical data only")
+                        signal = get_most_recent_signal(trades_df)
+            except Exception as e:
+                st.warning(f"Could not generate live signal: {e} - showing historical data")
+                signal = get_most_recent_signal(trades_df)
+        else:
+            signal = get_most_recent_signal(trades_df)
+            st.success(f"✓ DATA LOADED | {len(trades_df)} TRADES | PERIODS: 2014-2025")
 
         st.markdown("---")
 
-        # Display most recent signal
-        recent_signal = get_most_recent_signal(trades_df)
-        display_recent_signal(commodity, recent_signal)
+        # Display signal (live or historical)
+        display_recent_signal(commodity, signal)
 
         st.markdown("---")
 
