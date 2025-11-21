@@ -1,0 +1,499 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+AG Futures Signals Dashboard - Terminal Style
+High Conviction Corn & Soybean Trading Signals
+
+A minimal, terminal-style dashboard for displaying trading signals
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from datetime import datetime, timedelta
+import json
+import joblib
+
+# Page configuration - terminal style
+st.set_page_config(
+    page_title="AG SIGNALS | Terminal",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Terminal-style CSS
+st.markdown("""
+    <style>
+    /* Dark terminal background */
+    .stApp {
+        background-color: #0a0a0a;
+        color: #00ff00;
+        font-family: 'Courier New', monospace;
+    }
+
+    /* Headers */
+    h1, h2, h3 {
+        color: #00ff00;
+        font-family: 'Courier New', monospace;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetricValue"] {
+        color: #00ff00;
+        font-family: 'Courier New', monospace;
+        font-size: 28px;
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: #00ff00;
+        font-family: 'Courier New', monospace;
+    }
+
+    /* Dataframes */
+    .dataframe {
+        background-color: #0a0a0a !important;
+        color: #00ff00 !important;
+        font-family: 'Courier New', monospace !important;
+        border: 1px solid #00ff00 !important;
+    }
+
+    .dataframe th {
+        background-color: #0a0a0a !important;
+        color: #00ff00 !important;
+        border: 1px solid #00ff00 !important;
+    }
+
+    .dataframe td {
+        background-color: #0a0a0a !important;
+        color: #00ff00 !important;
+        border: 1px solid #00ff00 !important;
+    }
+
+    /* Dividers */
+    hr {
+        border-color: #00ff00;
+    }
+
+    /* Text */
+    p, div {
+        color: #00ff00;
+        font-family: 'Courier New', monospace;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Base directory
+BASE_DIR = Path(__file__).parent
+
+# Commodity configurations
+COMMODITY_CONFIGS = {
+    'corn': {
+        'data_path': BASE_DIR / 'data' / 'corn_combined_features.csv',
+        'config_path': BASE_DIR / 'models' / 'corn_high_conviction' / 'model_config.json',
+        'model_dir': BASE_DIR / 'models' / 'corn_high_conviction',
+        'validation_results': BASE_DIR / 'models' / 'corn_high_conviction' / 'validation_results' / 'walk_forward_6period_results.csv',
+        'validation_trades': BASE_DIR / 'models' / 'corn_high_conviction' / 'validation_results' / 'walk_forward_6period_trades.csv',
+        'display_name': 'CORN',
+        'emoji': '🌽'
+    },
+    'soybean': {
+        'data_path': BASE_DIR / 'data' / 'soybean_combined_features.csv',
+        'config_path': BASE_DIR / 'models' / 'soy_high_conviction' / 'model_config.json',
+        'model_dir': BASE_DIR / 'models' / 'soy_high_conviction',
+        'validation_results': BASE_DIR / 'models' / 'soy_high_conviction' / 'validation_results' / 'walk_forward_6period_results.csv',
+        'validation_trades': BASE_DIR / 'models' / 'soy_high_conviction' / 'validation_results' / 'walk_forward_6period_trades.csv',
+        'display_name': 'SOYBEANS',
+        'emoji': '🫘'
+    }
+}
+
+
+@st.cache_data
+def load_data(data_path):
+    """Load latest market data"""
+    df = pd.read_csv(data_path)
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.sort_values('date').reset_index(drop=True)
+    return df
+
+
+@st.cache_data
+def load_validation_results(results_path):
+    """Load walk-forward validation results"""
+    df = pd.read_csv(results_path)
+    return df
+
+
+@st.cache_data
+def load_validation_trades(trades_path):
+    """Load walk-forward validation trades"""
+    df = pd.read_csv(trades_path)
+    df['entry_date'] = pd.to_datetime(df['entry_date'])
+    df['exit_date'] = pd.to_datetime(df['exit_date'])
+    return df
+
+
+@st.cache_resource
+def load_model(model_dir):
+    """Load trained model"""
+    model_path = model_dir / 'model_2024.pkl'
+    scaler_path = model_dir / 'scaler_2024.pkl'
+    imputer_path = model_dir / 'imputer_2024.pkl'
+
+    model = joblib.load(model_path)
+    scaler = joblib.load(scaler_path)
+    imputer = joblib.load(imputer_path)
+
+    feature_names = list(imputer.feature_names_in_) if hasattr(imputer, 'feature_names_in_') else None
+
+    return model, imputer, scaler, feature_names
+
+
+def calculate_atr(prices, high=None, low=None, period=20):
+    """Calculate Average True Range"""
+    if high is not None and low is not None:
+        tr1 = high - low
+        tr2 = abs(high - prices.shift(1))
+        tr3 = abs(low - prices.shift(1))
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    else:
+        tr = prices.pct_change().abs().rolling(5).std() * prices
+
+    atr = tr.rolling(period).mean()
+    return atr
+
+
+def generate_current_signal(df, model, imputer, scaler, feature_cols, config):
+    """Generate current trading signal"""
+
+    LONG_PERCENTILE = config['parameters']['thresholds']['long_percentile']
+    SHORT_PERCENTILE = config['parameters']['thresholds']['short_percentile']
+    ROLLING_WINDOW = config['parameters']['thresholds']['rolling_window']
+    R_PER_TRADE = config['parameters']['position_sizing']['r_per_trade']
+    ATR_MULTIPLIER = config['parameters']['stops']['atr_multiplier']
+    ATR_PERIOD = config['parameters']['stops']['atr_period']
+    PROFIT_TARGET_R = config['parameters']['profit_targets']['target_r']
+    TIME_STOP_DAYS = config['parameters']['stops']['time_stop_days']
+
+    recent_df = df.tail(150).copy()
+
+    features = recent_df[feature_cols].ffill()
+    features_imputed = imputer.transform(features)
+    features_scaled = scaler.transform(features_imputed)
+
+    predictions = model.predict(features_scaled)
+    recent_df['prediction'] = predictions
+
+    recent_df['pred_percentile'] = recent_df['prediction'].rolling(
+        ROLLING_WINDOW, min_periods=20
+    ).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+
+    if 'high' in recent_df.columns and 'low' in recent_df.columns:
+        recent_df['atr'] = calculate_atr(
+            recent_df['close'],
+            recent_df['high'],
+            recent_df['low'],
+            period=ATR_PERIOD
+        )
+    else:
+        recent_df['atr'] = calculate_atr(recent_df['close'], period=ATR_PERIOD)
+
+    today = recent_df[recent_df['pred_percentile'].notna()].iloc[-1]
+
+    signal = None
+    position_size = 0
+    percentile = today['pred_percentile']
+
+    if percentile >= LONG_PERCENTILE:
+        signal = 'LONG'
+        position_size = 1.0
+    elif percentile <= SHORT_PERCENTILE:
+        signal = 'SHORT'
+        position_size = 1.0
+
+    if signal:
+        current_price = today['close']
+        atr = today['atr']
+        stop_distance = ATR_MULTIPLIER * atr
+
+        if signal == 'LONG':
+            stop_loss = current_price - stop_distance
+            profit_target = current_price + (PROFIT_TARGET_R * stop_distance)
+        else:
+            stop_loss = current_price + stop_distance
+            profit_target = current_price - (PROFIT_TARGET_R * stop_distance)
+
+        position_size_r = R_PER_TRADE * position_size
+
+        return {
+            'date': today['date'],
+            'signal': signal,
+            'confidence': percentile if signal == 'LONG' else (1 - percentile),
+            'prediction': today['prediction'],
+            'percentile': percentile,
+            'current_price': current_price,
+            'stop_loss': stop_loss,
+            'profit_target': profit_target,
+            'position_size_pct': position_size_r * 100,
+            'atr': atr,
+            'time_stop_date': today['date'] + timedelta(days=TIME_STOP_DAYS)
+        }
+    else:
+        return {
+            'date': today['date'],
+            'signal': 'HOLD',
+            'confidence': 0,
+            'prediction': today['prediction'],
+            'percentile': percentile,
+            'current_price': today['close'],
+            'stop_loss': None,
+            'profit_target': None,
+            'position_size_pct': 0,
+            'atr': today['atr'],
+            'time_stop_date': None
+        }
+
+
+def display_terminal_header():
+    """Display terminal-style header"""
+    st.markdown("```")
+    st.markdown("""
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                                                                               ║
+║                       AG FUTURES SIGNALS DASHBOARD                            ║
+║                          HIGH CONVICTION MODELS                               ║
+║                                                                               ║
+║                    CORN 🌽  |  SOYBEANS 🫘                                    ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+    """)
+    st.markdown("```")
+
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    st.markdown(f"**SYSTEM TIME:** `{current_time}`")
+    st.markdown("**MODEL:** `HIGH_CONVICTION_v2024 | 90th/10th PERCENTILE`")
+    st.markdown("---")
+
+
+def display_current_signal(commodity, signal):
+    """Display current signal in terminal style"""
+
+    st.markdown(f"### {COMMODITY_CONFIGS[commodity]['emoji']} {COMMODITY_CONFIGS[commodity]['display_name']} - CURRENT SIGNAL")
+
+    signal_date = signal['date'].strftime('%Y-%m-%d') if isinstance(signal['date'], pd.Timestamp) else signal['date']
+
+    if signal['signal'] == 'HOLD':
+        st.markdown("```")
+        st.markdown(f"""
+┌─────────────────────────────────────────────────────────────────┐
+│ SIGNAL: HOLD                                                    │
+│ DATE:   {signal_date}                                      │
+│                                                                 │
+│ STATUS: NO ACTIVE SIGNAL                                        │
+│ PRICE:  ${signal['current_price']:.2f}                                       │
+│ PRED:   {signal['prediction']:+.2%}                                         │
+│ PCTL:   {signal['percentile']:.1%} (NEED >90% OR <10%)                      │
+│                                                                 │
+│ [WAITING FOR HIGH CONVICTION TRIGGER]                           │
+└─────────────────────────────────────────────────────────────────┘
+        """)
+        st.markdown("```")
+    else:
+        signal_color = "LONG ↑" if signal['signal'] == 'LONG' else "SHORT ↓"
+        st.markdown("```")
+        st.markdown(f"""
+┌─────────────────────────────────────────────────────────────────┐
+│ ⚡ SIGNAL: {signal_color}                                       │
+│ DATE:     {signal_date}                                    │
+│                                                                 │
+│ ENTRY:    ${signal['current_price']:.2f}                                    │
+│ STOP:     ${signal['stop_loss']:.2f}                                    │
+│ TARGET:   ${signal['profit_target']:.2f}                                    │
+│                                                                 │
+│ CONFIDENCE: {signal['confidence']:.1%}                                     │
+│ PERCENTILE: {signal['percentile']:.1%}                                     │
+│ POSITION:   {signal['position_size_pct']:.1f}% of equity                          │
+│                                                                 │
+│ RISK/REWARD: 1:2                                                │
+│ TIME STOP:   {str(signal['time_stop_date'])[:10]} (10 days)               │
+└─────────────────────────────────────────────────────────────────┘
+        """)
+        st.markdown("```")
+
+
+def display_ytd_performance(commodity, results_df, trades_df):
+    """Display YTD performance metrics"""
+
+    st.markdown(f"### {COMMODITY_CONFIGS[commodity]['emoji']} {COMMODITY_CONFIGS[commodity]['display_name']} - YTD 2024-2025 PERFORMANCE")
+
+    # Get 2024-2025 period
+    ytd_results = results_df[results_df['period'] == '2024-2025'].iloc[0]
+    ytd_trades = trades_df[trades_df['period'] == '2024-2025'].copy()
+
+    # Calculate metrics
+    total_trades = int(ytd_results['total_trades'])
+    winning_trades = int(ytd_results['winning_trades'])
+    losing_trades = int(ytd_results['losing_trades'])
+    win_rate = ytd_results['win_rate']
+    total_pnl_r = ytd_results['total_pnl_r']
+    sharpe_ratio = ytd_results['sharpe_ratio']
+    max_drawdown_r = ytd_results['max_drawdown_r']
+    avg_win_r = ytd_results['avg_win_r']
+    avg_loss_r = ytd_results['avg_loss_r']
+
+    # Metrics display
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("TOTAL PNL", f"{total_pnl_r:.2f}R")
+        st.metric("SHARPE", f"{sharpe_ratio:.2f}")
+
+    with col2:
+        st.metric("WIN RATE", f"{win_rate:.1%}")
+        st.metric("TRADES", f"{total_trades}")
+
+    with col3:
+        st.metric("AVG WIN", f"{avg_win_r:.2f}R")
+        st.metric("AVG LOSS", f"{avg_loss_r:.2f}R")
+
+    with col4:
+        st.metric("MAX DD", f"{max_drawdown_r:.2f}R")
+        st.metric("W/L", f"{winning_trades}/{losing_trades}")
+
+    st.markdown("---")
+
+
+def display_ytd_trades(commodity, trades_df):
+    """Display YTD trade history"""
+
+    st.markdown(f"### {COMMODITY_CONFIGS[commodity]['emoji']} {COMMODITY_CONFIGS[commodity]['display_name']} - YTD 2024-2025 TRADE HISTORY")
+
+    ytd_trades = trades_df[trades_df['period'] == '2024-2025'].copy()
+    ytd_trades = ytd_trades.sort_values('entry_date', ascending=False)
+
+    # Format for display
+    display_trades = ytd_trades[[
+        'entry_date', 'exit_date', 'direction',
+        'entry_price', 'exit_price', 'pnl_r',
+        'exit_reason', 'days_held'
+    ]].copy()
+
+    display_trades['entry_date'] = display_trades['entry_date'].dt.strftime('%Y-%m-%d')
+    display_trades['exit_date'] = display_trades['exit_date'].dt.strftime('%Y-%m-%d')
+    display_trades['entry_price'] = display_trades['entry_price'].apply(lambda x: f"${x:.2f}")
+    display_trades['exit_price'] = display_trades['exit_price'].apply(lambda x: f"${x:.2f}")
+    display_trades['pnl_r'] = display_trades['pnl_r'].apply(lambda x: f"{x:+.2f}R")
+
+    display_trades.columns = [
+        'ENTRY', 'EXIT', 'DIR',
+        'ENTRY_PX', 'EXIT_PX', 'PNL',
+        'EXIT_RSN', 'DAYS'
+    ]
+
+    st.dataframe(
+        display_trades,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.markdown("---")
+
+
+def display_all_periods_summary(results_df):
+    """Display summary of all validation periods"""
+
+    st.markdown("### 📊 ALL PERIODS - WALK-FORWARD VALIDATION SUMMARY")
+
+    # Format for display
+    display_results = results_df[[
+        'period', 'total_trades', 'win_rate',
+        'total_pnl_r', 'sharpe_ratio', 'max_drawdown_r'
+    ]].copy()
+
+    display_results['win_rate'] = display_results['win_rate'].apply(lambda x: f"{x:.1%}")
+    display_results['total_pnl_r'] = display_results['total_pnl_r'].apply(lambda x: f"{x:+.2f}R")
+    display_results['sharpe_ratio'] = display_results['sharpe_ratio'].apply(lambda x: f"{x:.2f}")
+    display_results['max_drawdown_r'] = display_results['max_drawdown_r'].apply(lambda x: f"{x:.2f}R")
+
+    display_results.columns = [
+        'PERIOD', 'TRADES', 'WIN_RATE',
+        'TOTAL_PNL', 'SHARPE', 'MAX_DD'
+    ]
+
+    st.dataframe(
+        display_results,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+def main():
+    """Main dashboard application"""
+
+    # Display header
+    display_terminal_header()
+
+    # Select commodity
+    commodity = st.selectbox(
+        "SELECT COMMODITY:",
+        options=['corn', 'soybean'],
+        format_func=lambda x: f"{COMMODITY_CONFIGS[x]['emoji']} {COMMODITY_CONFIGS[x]['display_name']}"
+    )
+
+    config = COMMODITY_CONFIGS[commodity]
+
+    try:
+        # Load data
+        with st.spinner(f"LOADING {config['display_name']} DATA..."):
+            df = load_data(config['data_path'])
+            results_df = load_validation_results(config['validation_results'])
+            trades_df = load_validation_trades(config['validation_trades'])
+
+            with open(config['config_path'], 'r') as f:
+                model_config = json.load(f)
+
+            model, imputer, scaler, feature_names = load_model(config['model_dir'])
+
+        st.success(f"✓ DATA LOADED | LATEST: {df['date'].max().strftime('%Y-%m-%d')}")
+
+        # Generate current signal
+        with st.spinner("GENERATING SIGNAL..."):
+            signal = generate_current_signal(df, model, imputer, scaler, feature_names, model_config)
+
+        st.markdown("---")
+
+        # Display current signal
+        display_current_signal(commodity, signal)
+
+        st.markdown("---")
+
+        # Display YTD performance
+        display_ytd_performance(commodity, results_df, trades_df)
+
+        # Display YTD trades
+        display_ytd_trades(commodity, trades_df)
+
+        # Display all periods summary
+        display_all_periods_summary(results_df)
+
+    except Exception as e:
+        st.error(f"❌ ERROR: {str(e)}")
+        st.exception(e)
+
+    # Footer
+    st.markdown("---")
+    st.markdown("```")
+    st.markdown("""
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║  ⚠️  DISCLAIMER: NOT FINANCIAL ADVICE | TRADE AT YOUR OWN RISK               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+    """)
+    st.markdown("```")
+
+
+if __name__ == '__main__':
+    main()

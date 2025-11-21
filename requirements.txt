@@ -14,6 +14,9 @@ yfinance>=0.2.40
 requests>=2.31.0
 beautifulsoup4>=4.12.2
 
+# Dashboard
+streamlit>=1.28.0
+
 # Optional: API framework (if deploying REST API)
 # fastapi>=0.104.0
 # uvicorn>=0.24.0
