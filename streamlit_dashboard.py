@@ -81,6 +81,17 @@ st.markdown("""
         color: #00ff00;
         font-family: 'Courier New', monospace;
     }
+
+    /* Terminal box style */
+    .terminal-box {
+        background-color: #0a0a0a;
+        border: 2px solid #00ff00;
+        padding: 20px;
+        font-family: 'Courier New', monospace;
+        color: #00ff00;
+        white-space: pre;
+        margin: 10px 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -140,8 +151,9 @@ def get_most_recent_signal(trades_df):
 
 def display_terminal_header():
     """Display terminal-style header"""
-    st.markdown("```")
+
     st.markdown("""
+<div class="terminal-box">
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                               ║
 ║                       AG FUTURES SIGNALS DASHBOARD                            ║
@@ -150,8 +162,8 @@ def display_terminal_header():
 ║                    CORN 🌽  |  SOYBEANS 🫘                                    ║
 ║                                                                               ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
-    """)
-    st.markdown("```")
+</div>
+    """, unsafe_allow_html=True)
 
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     st.markdown(f"**SYSTEM TIME:** `{current_time}`")
@@ -171,24 +183,30 @@ def display_recent_signal(commodity, signal):
     signal_color = "LONG ↑" if signal['signal'] == 'LONG' else "SHORT ↓"
     pnl_display = f"{signal['pnl_r']:+.2f}R"
 
-    st.markdown("```")
-    st.markdown(f"""
+    # Format prices with proper spacing
+    entry_px_str = f"${signal['entry_price']:.2f}"
+    exit_px_str = f"${signal['exit_price']:.2f}"
+
+    box_content = f"""
+<div class="terminal-box">
 ┌─────────────────────────────────────────────────────────────────┐
-│ LAST TRADE: {signal_color}                                      │
-│ ENTRY:      {entry_date}                                   │
-│ EXIT:       {exit_date}                                   │
+│ LAST TRADE: {signal_color:<50} │
+│ ENTRY:      {entry_date:<50} │
+│ EXIT:       {exit_date:<50} │
 │                                                                 │
-│ ENTRY PX:   ${signal['entry_price']:.2f}                                    │
-│ EXIT PX:    ${signal['exit_price']:.2f}                                    │
-│ PNL:        {pnl_display}                                             │
+│ ENTRY PX:   {entry_px_str:<50} │
+│ EXIT PX:    {exit_px_str:<50} │
+│ PNL:        {pnl_display:<50} │
 │                                                                 │
-│ EXIT RSN:   {signal['exit_reason'].upper()}                                          │
-│ DAYS HELD:  {signal['days_held']}                                                 │
+│ EXIT RSN:   {signal['exit_reason'].upper():<50} │
+│ DAYS HELD:  {signal['days_held']:<50} │
 │                                                                 │
 │ [HISTORICAL BACKTEST DATA - NOT LIVE TRADING]                   │
 └─────────────────────────────────────────────────────────────────┘
-    """)
-    st.markdown("```")
+</div>
+    """
+
+    st.markdown(box_content, unsafe_allow_html=True)
 
 
 def display_ytd_performance(commodity, results_df, trades_df):
@@ -361,13 +379,13 @@ def main():
 
     # Footer
     st.markdown("---")
-    st.markdown("```")
     st.markdown("""
+<div class="terminal-box">
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║  ⚠️  HISTORICAL BACKTEST DATA | NOT FINANCIAL ADVICE                         ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
-    """)
-    st.markdown("```")
+</div>
+    """, unsafe_allow_html=True)
 
 
 if __name__ == '__main__':
