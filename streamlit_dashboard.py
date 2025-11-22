@@ -556,7 +556,12 @@ def display_ytd_performance(commodity, results_df, trades_df):
     if 'avg_r' in ytd_results:
         # Corn format
         total_pnl_r = ytd_results['avg_r'] * total_trades
-        max_drawdown_r = abs(ytd_results['max_dd'] / 100000)  # Convert from dollars to approximate R
+        # Calculate max drawdown from actual trades
+        ytd_sorted = ytd_trades.sort_values('entry_date')
+        ytd_sorted['cumulative_r'] = ytd_sorted['pnl_r'].cumsum()
+        running_max = ytd_sorted['cumulative_r'].expanding().max()
+        drawdown = ytd_sorted['cumulative_r'] - running_max
+        max_drawdown_r = abs(drawdown.min()) if len(drawdown) > 0 else 0
     else:
         # Soybean format (already in R)
         total_pnl_r = ytd_results['total_return']
@@ -632,7 +637,7 @@ def display_ytd_trades(commodity, trades_df):
     st.markdown("---")
 
 
-def display_all_periods_summary(commodity, results_df):
+def display_all_periods_summary(commodity, results_df, trades_df):
     """Display summary of all validation periods"""
 
     st.markdown(f"### 📊 {COMMODITY_CONFIGS[commodity]['display_name']} - ALL PERIODS WALK-FORWARD VALIDATION")
@@ -642,9 +647,21 @@ def display_all_periods_summary(commodity, results_df):
 
     # Handle different formats (corn vs soybean)
     if 'avg_r' in display_results.columns:
-        # Corn format - calculate total R from avg_r * num_trades
+        # Corn format - calculate total R from avg_r * num_trades and max DD from trades
         display_results['total_pnl_r'] = display_results['avg_r'] * display_results['num_trades']
-        display_results['max_dd_r'] = display_results['max_dd'].abs() / 100000  # Approximate conversion
+
+        # Calculate max DD for each period from actual trades
+        max_dd_list = []
+        for period in display_results['period']:
+            period_trades = trades_df[trades_df['period'] == period].sort_values('entry_date')
+            if len(period_trades) > 0:
+                period_trades['cumulative_r'] = period_trades['pnl_r'].cumsum()
+                running_max = period_trades['cumulative_r'].expanding().max()
+                drawdown = period_trades['cumulative_r'] - running_max
+                max_dd_list.append(abs(drawdown.min()))
+            else:
+                max_dd_list.append(0)
+        display_results['max_dd_r'] = max_dd_list
     else:
         # Soybean format - already has total_return in R
         display_results['total_pnl_r'] = display_results['total_return']
@@ -760,7 +777,7 @@ def main():
         display_ytd_trades(commodity, trades_df)
 
         # Display all periods summary
-        display_all_periods_summary(commodity, results_df)
+        display_all_periods_summary(commodity, results_df, trades_df)
 
     except Exception as e:
         st.error(f"❌ ERROR: {str(e)}")
