@@ -506,16 +506,30 @@ def display_ytd_performance(commodity, results_df, trades_df):
     ytd_results = results_df[results_df['period'] == '2024-2025'].iloc[0]
     ytd_trades = trades_df[trades_df['period'] == '2024-2025'].copy()
 
-    # Calculate metrics
-    total_trades = int(ytd_results['total_trades'])
-    winning_trades = int(ytd_results['winning_trades'])
-    losing_trades = int(ytd_results['losing_trades'])
+    # Extract metrics from available columns
+    total_trades = int(ytd_results['num_trades'])
     win_rate = ytd_results['win_rate']
-    total_pnl_r = ytd_results['total_pnl_r']
-    sharpe_ratio = ytd_results['sharpe_ratio']
-    max_drawdown_r = ytd_results['max_drawdown_r']
-    avg_win_r = ytd_results['avg_win_r']
-    avg_loss_r = ytd_results['avg_loss_r']
+    sharpe_ratio = ytd_results['sharpe']
+
+    # Calculate winning and losing trades
+    winning_trades = int(total_trades * win_rate)
+    losing_trades = total_trades - winning_trades
+
+    # Get average win/loss (column names differ between corn and soy)
+    avg_win_r = ytd_results['avg_win']
+    avg_loss_r = ytd_results['avg_loss']
+
+    # Calculate total PnL in R
+    # For soybean, total_return is already in R
+    # For corn, we need to calculate from avg_r * num_trades
+    if 'avg_r' in ytd_results:
+        # Corn format
+        total_pnl_r = ytd_results['avg_r'] * total_trades
+        max_drawdown_r = abs(ytd_results['max_dd'] / 100000)  # Convert from dollars to approximate R
+    else:
+        # Soybean format (already in R)
+        total_pnl_r = ytd_results['total_return']
+        max_drawdown_r = abs(ytd_results['max_dd'])
 
     # Metrics display
     col1, col2, col3, col4 = st.columns(4)
@@ -529,8 +543,8 @@ def display_ytd_performance(commodity, results_df, trades_df):
         st.metric("TRADES", f"{total_trades}")
 
     with col3:
-        st.metric("AVG WIN", f"{avg_win_r:.2f}R")
-        st.metric("AVG LOSS", f"{avg_loss_r:.2f}R")
+        st.metric("AVG WIN", f"{avg_win_r:.2%}")
+        st.metric("AVG LOSS", f"{avg_loss_r:.2%}")
 
     with col4:
         st.metric("MAX DD", f"{max_drawdown_r:.2f}R")
@@ -580,24 +594,37 @@ def display_all_periods_summary(commodity, results_df):
 
     st.markdown(f"### 📊 {COMMODITY_CONFIGS[commodity]['display_name']} - ALL PERIODS WALK-FORWARD VALIDATION")
 
+    # Calculate total PnL for each period
+    display_results = results_df.copy()
+
+    # Handle different formats (corn vs soybean)
+    if 'avg_r' in display_results.columns:
+        # Corn format - calculate total R from avg_r * num_trades
+        display_results['total_pnl_r'] = display_results['avg_r'] * display_results['num_trades']
+        display_results['max_dd_r'] = display_results['max_dd'].abs() / 100000  # Approximate conversion
+    else:
+        # Soybean format - already has total_return in R
+        display_results['total_pnl_r'] = display_results['total_return']
+        display_results['max_dd_r'] = display_results['max_dd'].abs()
+
     # Format for display
-    display_results = results_df[[
-        'period', 'total_trades', 'win_rate',
-        'total_pnl_r', 'sharpe_ratio', 'max_drawdown_r'
+    display_table = display_results[[
+        'period', 'num_trades', 'win_rate',
+        'total_pnl_r', 'sharpe', 'max_dd_r'
     ]].copy()
 
-    display_results['win_rate'] = display_results['win_rate'].apply(lambda x: f"{x:.1%}")
-    display_results['total_pnl_r'] = display_results['total_pnl_r'].apply(lambda x: f"{x:+.2f}R")
-    display_results['sharpe_ratio'] = display_results['sharpe_ratio'].apply(lambda x: f"{x:.2f}")
-    display_results['max_drawdown_r'] = display_results['max_drawdown_r'].apply(lambda x: f"{x:.2f}R")
+    display_table['win_rate'] = display_table['win_rate'].apply(lambda x: f"{x:.1%}")
+    display_table['total_pnl_r'] = display_table['total_pnl_r'].apply(lambda x: f"{x:+.2f}R")
+    display_table['sharpe'] = display_table['sharpe'].apply(lambda x: f"{x:.2f}")
+    display_table['max_dd_r'] = display_table['max_dd_r'].apply(lambda x: f"{x:.2f}R")
 
-    display_results.columns = [
+    display_table.columns = [
         'PERIOD', 'TRADES', 'WIN_RATE',
         'TOTAL_PNL', 'SHARPE', 'MAX_DD'
     ]
 
     st.dataframe(
-        display_results,
+        display_table,
         use_container_width=True,
         hide_index=True
     )
@@ -606,10 +633,10 @@ def display_all_periods_summary(commodity, results_df):
     st.markdown("#### AGGREGATE STATISTICS")
     col1, col2, col3, col4 = st.columns(4)
 
-    total_pnl_all = results_df['total_pnl_r'].sum()
-    avg_win_rate = results_df['win_rate'].mean()
-    avg_sharpe = results_df['sharpe_ratio'].mean()
-    worst_dd = results_df['max_drawdown_r'].max()
+    total_pnl_all = display_results['total_pnl_r'].sum()
+    avg_win_rate = display_results['win_rate'].mean()
+    avg_sharpe = display_results['sharpe'].mean()
+    worst_dd = display_results['max_dd_r'].max()
 
     with col1:
         st.metric("TOTAL PNL (ALL)", f"{total_pnl_all:.2f}R")
