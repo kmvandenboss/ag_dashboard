@@ -220,8 +220,39 @@ def load_validation_results(results_path):
 def load_validation_trades(trades_path):
     """Load walk-forward validation trades"""
     df = pd.read_csv(trades_path)
-    df['entry_date'] = pd.to_datetime(df['entry_date'])
-    df['exit_date'] = pd.to_datetime(df['exit_date'])
+
+    # Handle different file formats (corn vs soybean)
+    if 'entry_date' in df.columns:
+        # Corn format - has detailed trade info
+        df['entry_date'] = pd.to_datetime(df['entry_date'])
+        df['exit_date'] = pd.to_datetime(df['exit_date'])
+
+        # Add period column based on entry_date year
+        df['period'] = df['entry_date'].apply(lambda x:
+            '2014-2015' if x.year in [2014, 2015] else
+            '2016-2017' if x.year in [2016, 2017] else
+            '2018-2019' if x.year in [2018, 2019] else
+            '2020-2021' if x.year in [2020, 2021] else
+            '2022-2023' if x.year in [2022, 2023] else
+            '2024-2025'
+        )
+
+        # Map final_r to pnl_r for consistency
+        if 'final_r' in df.columns:
+            df['pnl_r'] = df['final_r']
+    else:
+        # Soybean format - simplified format with period already included
+        df['date'] = pd.to_datetime(df['date'])
+        # Create dummy columns for compatibility
+        df['entry_date'] = df['date']
+        df['exit_date'] = df['date']
+        df['direction'] = df['signal'].apply(lambda x: 'LONG' if x == 1 else 'SHORT')
+        df['entry_price'] = 0  # Not available in this format
+        df['exit_price'] = 0
+        df['pnl_r'] = df['strategy_return'] * 100  # Convert to R-like format
+        df['exit_reason'] = 'N/A'
+        df['days_held'] = 0
+
     return df
 
 
@@ -561,24 +592,36 @@ def display_ytd_trades(commodity, trades_df):
     ytd_trades = trades_df[trades_df['period'] == '2024-2025'].copy()
     ytd_trades = ytd_trades.sort_values('entry_date', ascending=False)
 
-    # Format for display
-    display_trades = ytd_trades[[
-        'entry_date', 'exit_date', 'direction',
-        'entry_price', 'exit_price', 'pnl_r',
-        'exit_reason', 'days_held'
-    ]].copy()
+    # Check if we have detailed trade data (corn format) or simplified (soy format)
+    has_prices = ytd_trades['entry_price'].max() > 0
 
-    display_trades['entry_date'] = display_trades['entry_date'].dt.strftime('%Y-%m-%d')
-    display_trades['exit_date'] = display_trades['exit_date'].dt.strftime('%Y-%m-%d')
-    display_trades['entry_price'] = display_trades['entry_price'].apply(lambda x: f"${x:.2f}")
-    display_trades['exit_price'] = display_trades['exit_price'].apply(lambda x: f"${x:.2f}")
-    display_trades['pnl_r'] = display_trades['pnl_r'].apply(lambda x: f"{x:+.2f}R")
+    if has_prices:
+        # Full trade detail available (corn format)
+        display_trades = ytd_trades[[
+            'entry_date', 'exit_date', 'direction',
+            'entry_price', 'exit_price', 'pnl_r',
+            'exit_reason', 'days_held'
+        ]].copy()
 
-    display_trades.columns = [
-        'ENTRY', 'EXIT', 'DIR',
-        'ENTRY_PX', 'EXIT_PX', 'PNL',
-        'EXIT_RSN', 'DAYS'
-    ]
+        display_trades['entry_date'] = display_trades['entry_date'].dt.strftime('%Y-%m-%d')
+        display_trades['exit_date'] = display_trades['exit_date'].dt.strftime('%Y-%m-%d')
+        display_trades['entry_price'] = display_trades['entry_price'].apply(lambda x: f"${x:.2f}")
+        display_trades['exit_price'] = display_trades['exit_price'].apply(lambda x: f"${x:.2f}")
+        display_trades['pnl_r'] = display_trades['pnl_r'].apply(lambda x: f"{x:+.2f}R")
+
+        display_trades.columns = [
+            'ENTRY', 'EXIT', 'DIR',
+            'ENTRY_PX', 'EXIT_PX', 'PNL',
+            'EXIT_RSN', 'DAYS'
+        ]
+    else:
+        # Simplified format (soy format) - show fewer columns
+        display_trades = ytd_trades[['entry_date', 'direction', 'pnl_r']].copy()
+
+        display_trades['entry_date'] = display_trades['entry_date'].dt.strftime('%Y-%m-%d')
+        display_trades['pnl_r'] = display_trades['pnl_r'].apply(lambda x: f"{x:+.2f}R")
+
+        display_trades.columns = ['DATE', 'DIRECTION', 'PNL']
 
     st.dataframe(
         display_trades,
