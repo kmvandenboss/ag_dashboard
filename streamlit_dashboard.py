@@ -84,15 +84,50 @@ st.markdown("""
         font-family: 'Courier New', monospace;
     }
 
-    /* Terminal box style */
+    /* Terminal box style - mobile responsive */
     .terminal-box {
         background-color: #0a0a0a;
         border: 2px solid #00ff00;
-        padding: 20px;
+        padding: 15px;
         font-family: 'Courier New', monospace;
         color: #00ff00;
-        white-space: pre;
+        white-space: pre-wrap;
+        word-wrap: break-word;
         margin: 10px 0;
+        overflow-x: hidden;
+        max-width: 100%;
+        font-size: clamp(10px, 2.5vw, 14px);
+        line-height: 1.3;
+    }
+
+    /* Mobile optimization */
+    @media (max-width: 768px) {
+        .terminal-box {
+            padding: 10px;
+            font-size: 10px;
+            line-height: 1.2;
+        }
+
+        h1 {
+            font-size: 18px !important;
+            letter-spacing: 1px !important;
+        }
+
+        h2, h3 {
+            font-size: 14px !important;
+            letter-spacing: 1px !important;
+        }
+
+        [data-testid="stMetricValue"] {
+            font-size: 18px !important;
+        }
+    }
+
+    /* Prevent horizontal scroll */
+    .main .block-container {
+        max-width: 100%;
+        padding-left: 1rem;
+        padding-right: 1rem;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -351,14 +386,14 @@ def display_terminal_header():
 
     st.markdown("""
 <div class="terminal-box">
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║                                                                               ║
-║                       AG FUTURES SIGNALS DASHBOARD                            ║
-║                          HIGH CONVICTION MODELS                               ║
-║                                                                               ║
-║                    CORN 🌽  |  SOYBEANS 🫘                                    ║
-║                                                                               ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════╗
+║                               ║
+║  AG FUTURES SIGNALS           ║
+║  HIGH CONVICTION MODELS       ║
+║                               ║
+║  CORN 🌽  |  SOYBEANS 🫘      ║
+║                               ║
+╚═══════════════════════════════╝
 </div>
     """, unsafe_allow_html=True)
 
@@ -387,17 +422,18 @@ def display_recent_signal(commodity, signal):
         if signal['signal'] == 'HOLD':
             box_content = f"""
 <div class="terminal-box">
-┌─────────────────────────────────────────────────────────────────┐
-│ SIGNAL: HOLD                                                    │
-│ DATE:   {signal_date:<50} │
-│                                                                 │
-│ STATUS: NO ACTIVE SIGNAL                                        │
-│ PRICE:  ${signal['current_price']:.2f}{'':42} │
-│ PRED:   {signal['prediction']:+.2%}{'':44} │
-│ PCTL:   {signal['percentile']:.1%} (NEED >90% OR <10%){'':24} │
-│                                                                 │
-│ [WAITING FOR HIGH CONVICTION TRIGGER]                           │
-└─────────────────────────────────────────────────────────────────┘
+╔══════════════════════════════════╗
+║ SIGNAL: HOLD
+║ DATE: {signal_date}
+║
+║ STATUS: NO ACTIVE SIGNAL
+║ PRICE: ${signal['current_price']:.2f}
+║ PRED: {signal['prediction']:+.2%}
+║ PCTL: {signal['percentile']:.1%}
+║   (NEED >90% OR <10%)
+║
+║ [WAITING FOR HIGH CONVICTION]
+╚══════════════════════════════════╝
 </div>
             """
         else:
@@ -408,23 +444,24 @@ def display_recent_signal(commodity, signal):
 
             box_content = f"""
 <div class="terminal-box">
-┌─────────────────────────────────────────────────────────────────┐
-│ ⚡ SIGNAL: {signal_color:<50} │
-│ DATE:     {signal_date:<50} │
-│                                                                 │
-│ ENTRY:    {price_str:<50} │
-│ STOP:     {stop_str:<50} │
-│ TARGET:   {target_str:<50} │
-│                                                                 │
-│ CONFIDENCE: {signal['confidence']:.1%}{'':44} │
-│ PERCENTILE: {signal['percentile']:.1%}{'':44} │
-│ POSITION:   {signal['position_size_pct']:.1f}% of equity{'':33} │
-│                                                                 │
-│ RISK/REWARD: 1:2{'':45} │
-│ TIME STOP:   {time_stop_str} (10 days){'':29} │
-│                                                                 │
-│ [🔴 LIVE SIGNAL - CURRENT DATA]                                │
-└─────────────────────────────────────────────────────────────────┘
+╔══════════════════════════════════╗
+║ ⚡ SIGNAL: {signal_color}
+║ DATE: {signal_date}
+║
+║ ENTRY: {price_str}
+║ STOP: {stop_str}
+║ TARGET: {target_str}
+║
+║ CONFIDENCE: {signal['confidence']:.1%}
+║ PERCENTILE: {signal['percentile']:.1%}
+║ POSITION: {signal['position_size_pct']:.1f}% equity
+║
+║ RISK/REWARD: 1:2
+║ TIME STOP: {time_stop_str}
+║   (10 days)
+║
+║ [🔴 LIVE SIGNAL]
+╚══════════════════════════════════╝
 </div>
             """
     else:
@@ -440,20 +477,20 @@ def display_recent_signal(commodity, signal):
 
         box_content = f"""
 <div class="terminal-box">
-┌─────────────────────────────────────────────────────────────────┐
-│ LAST TRADE: {signal_color:<50} │
-│ ENTRY:      {entry_date:<50} │
-│ EXIT:       {exit_date:<50} │
-│                                                                 │
-│ ENTRY PX:   {entry_px_str:<50} │
-│ EXIT PX:    {exit_px_str:<50} │
-│ PNL:        {pnl_display:<50} │
-│                                                                 │
-│ EXIT RSN:   {signal['exit_reason'].upper():<50} │
-│ DAYS HELD:  {signal['days_held']:<50} │
-│                                                                 │
-│ [HISTORICAL BACKTEST DATA - NOT LIVE TRADING]                   │
-└─────────────────────────────────────────────────────────────────┘
+╔══════════════════════════════════╗
+║ LAST TRADE: {signal_color}
+║ ENTRY: {entry_date}
+║ EXIT: {exit_date}
+║
+║ ENTRY PX: {entry_px_str}
+║ EXIT PX: {exit_px_str}
+║ PNL: {pnl_display}
+║
+║ EXIT RSN: {signal['exit_reason'].upper()}
+║ DAYS HELD: {signal['days_held']}
+║
+║ [HISTORICAL BACKTEST]
+╚══════════════════════════════════╝
 </div>
         """
 
